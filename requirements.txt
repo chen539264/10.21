@@ -1,0 +1,7 @@
+streamlit==1.65.0
+ultralytics==8.4.177
+torch
+torchvision
+numpy
+Pillow
+streamlit-echarts==0.4.0

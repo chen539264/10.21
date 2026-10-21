@@ -17,40 +17,8 @@ from shed_ui import header, dashboard, event_table
 with (ROOT/'assets/style.css').open(encoding='utf-8') as css:
     st.markdown('<style>'+css.read()+'</style>',unsafe_allow_html=True)
 header()
-from shed_auth import verify
-users_path=Path(os.environ.get('SHED_USERS_FILE',str(ROOT/'.streamlit/users.json')))
-try:
-    if users_path.exists():
-        users=json.loads(users_path.read_text(encoding='utf-8'))
-    else:
-        users=st.secrets.to_dict().get('accounts',{})
-except Exception:
-    users={}
-auth_revision=hashlib.sha256(json.dumps(users,sort_keys=True).encode()).hexdigest()
-if st.session_state.get('auth_revision')!=auth_revision:
-    st.session_state.pop('authenticated_user',None)
-operator_name=st.session_state.get('authenticated_user')
-if operator_name:
-    st.caption('当前接警账号：'+operator_name)
-    if st.button('退出登录'):
-        st.session_state.clear(); st.rerun()
-else:
-    st.caption('公开浏览模式 · 图片检测可直接体验；视频分析、接警处置及导出需工作人员登录。')
-    with st.expander('工作人员登录',expanded=False):
-        if not users:
-            st.info('尚未配置工作人员账户，不影响公开浏览。')
-        else:
-            with st.form('login'):
-                username=st.text_input('登录账号')
-                password=st.text_input('密码',type='password')
-                submitted=st.form_submit_button('登录')
-            if submitted:
-                if verify(users,username,password):
-                    st.session_state['authenticated_user']=username
-                    st.session_state['auth_revision']=auth_revision
-                    st.rerun()
-                else:
-                    time.sleep(1); st.error('账号或密码错误')
+operator_name='匿名演示用户'
+st.caption('开放演示 · 所有人均可检测、接警和结案；处置记录标记为匿名演示用户。')
 store=Store(Path(os.environ.get('SHED_DATA_DIR',str(ROOT/'shed_runtime'))))
 overview=store.all()
 @st.cache_resource
@@ -87,104 +55,105 @@ with video_tab:
     st.markdown('<div class="section-kicker">VIDEO MONITORING</div>',unsafe_allow_html=True)
     st.subheader('从一段车棚视频开始')
     st.caption('检测按采样帧运行，不是实时摄像头；连续命中用于演示确认，未通过车棚场景校准。')
-    a,b=st.columns(2)
-    site=a.text_input('车棚位置','浙江万里学院 · 示例车棚')
-    contact=b.text_input('演示值班人员','保卫部测试值班员')
-    with st.expander('检测参数 · 默认使用现有模型配置',expanded=False):
-        a,b,c=st.columns(3)
-        threshold=a.number_input('检测阈值',0.001,0.9999,0.1,format='%.4f')
-        interval=b.selectbox('采样间隔（视频秒）',[0.5,1.0,2.0],index=1)
-        required=c.number_input('连续命中采样帧数',1,10,3)
-        st.caption('连续 5 个采样帧未检出后，才允许为新的火情生成事件。同一地点、视频和配置重复运行会记录新实验，但复用已确认事件。')
-    st.markdown('<div class="flow"><span>01 上传视频</span><span>02 识别异常</span><span>03 生成模拟短信</span><span>04 人员接警处置</span></div>',unsafe_allow_html=True)
-    upload=st.file_uploader('上传视频（建议短视频，最多分析前 10 分钟）',type=['mp4','avi','mov','mkv'])
-    if upload:
-        st.video(upload)
-    else:
-        st.markdown('<div class="empty">▷<strong>监测画面待接入</strong>上传一段车棚视频，查看疑似火情与事件记录<br><small>建议使用短视频 · 最多分析前 10 分钟</small></div>',unsafe_allow_html=True)
-    if not operator_name: st.caption('视频分析会写入公共事件库，请先使用工作人员账户登录。')
-    if st.button('开始视频分析',disabled=upload is None or not operator_name,type='primary'):
-        if not site.strip() or not contact.strip():
-            st.error('请填写车棚位置与值班人员')
+    controls,screen=st.columns([1,2.3],gap='large')
+    with controls:
+        site=st.text_input('车棚位置','浙江万里学院 · 示例车棚')
+        contact=st.text_input('演示值班人员','保卫部测试值班员')
+        with st.expander('检测参数 · 默认使用现有模型配置',expanded=False):
+            threshold=st.number_input('检测阈值',0.001,0.9999,0.1,format='%.4f')
+            interval=st.selectbox('采样间隔（视频秒）',[0.5,1.0,2.0],index=1)
+            required=st.number_input('连续命中采样帧数',1,10,3)
+            st.caption('连续 5 个采样帧未检出后，才允许为新的火情生成事件。同一地点、视频和配置重复运行会记录新实验，但复用已确认事件。')
+        st.markdown('<div class="flow"><span>01 上传视频</span><span>02 识别异常</span><span>03 生成模拟短信</span><span>04 人员接警处置</span></div>',unsafe_allow_html=True)
+        upload=st.file_uploader('上传视频（建议短视频，最多分析前 10 分钟）',type=['mp4','avi','mov','mkv'])
+        start_analysis=st.button('开始视频分析',disabled=upload is None,type='primary',use_container_width=True)
+    with screen:
+        if upload:
+            st.video(upload)
         else:
-            cap=None; temp=None; runlog=None
-            try:
-                import cv2
-                blob=upload.getvalue()
-                video_hash=hashlib.sha256(blob).hexdigest()
-                model_hash=digest(find_weight())
-                configuration=dict(site=site,video=upload.name,video_sha256=video_hash,model_sha256=model_hash,
-                    threshold=threshold,interval=float(interval),required=int(required),clear=5,imgsz=960,device='cpu',
-                    max_video_seconds=600,sms_mode='模拟发送',
-                    code_sha256={n:digest(ROOT/n) for n in ['shed_app.py','shed_events.py','shed_runlog.py','shed_auth.py']})
-                identity={k:configuration[k] for k in ['site','video_sha256','model_sha256','threshold','interval','required','clear','imgsz','device']}
-                batch_key=hashlib.sha256(json.dumps(identity,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
-                runlog=RunLog(store.root,configuration)
-                with tempfile.NamedTemporaryFile(suffix=Path(upload.name).suffix,delete=False) as f:
-                    f.write(blob);temp=f.name
-                cap=cv2.VideoCapture(temp)
-                fps=cap.get(cv2.CAP_PROP_FPS)
-                expected_frames=cap.get(cv2.CAP_PROP_FRAME_COUNT)
-                if not cap.isOpened() or not 0<fps<1000:
-                    raise ValueError('无法解码视频或帧率无效，请转换为标准 MP4 后重试')
-                gate=Gate(int(required));stride=max(1,round(fps*interval))
-                preview=st.empty();status=st.empty();start=time.perf_counter()
-                samples=0;events=[];idx=0;inference=0.;ended=False
-                while idx/fps<600:
-                    ok,frame=cap.read()
-                    if not ok:
-                        ended=True;break
-                    t=idx/fps;idx+=1
-                    if (idx-1)%stride:continue
-                    tick=time.perf_counter();score,marked,boxes=predict(frame,threshold)
-                    inference+=time.perf_counter()-tick;samples+=1
-                    first=gate.step(score>=threshold,t)
-                    runlog.frame(dict(frame_index=idx-1,video_seconds=t,time_basis='frame_index/fps',
-                        score=score,boxes=boxes,positive=score>=threshold,confirmation_start=first,
-                        inference_seconds=time.perf_counter()-tick))
-                    preview.image(marked,channels='BGR',caption=f'视频 {t:.1f}s · '+('疑似火情' if score>=threshold else '本采样帧未检出'),use_container_width=True)
-                    if first is not None:
-                        # Store evidence before publishing an actionable event.
-                        import uuid
-                        event_key=batch_key+':'+str(first)
-                        evidence=hashlib.sha256(event_key.encode()).hexdigest()+'.jpg'
-                        if not (store.root/evidence).exists() and not cv2.imwrite(str(store.root/evidence),marked):
-                            raise ValueError('告警截图保存失败')
-                        eid=store.create(event_key=event_key,run_id=runlog.path.name,site=site,contact=contact,video=upload.name,video_sha256=hashlib.sha256(blob).hexdigest(),
-                            video_time=t,first_positive_time=first,confirmation_video_seconds=t-first,
-                            analysis_elapsed_seconds=time.perf_counter()-start,threshold=threshold,score=score,evidence=evidence)
-                        events.append(eid)
-                    status.info(f'已分析 {samples} 个采样帧，关联 {len(events)} 个事件（含复用）· 短信仅模拟')
-                if samples==0:raise ValueError('视频未解码出任何有效帧')
-                result=dict(video=upload.name,samples=samples,event_ids=events,elapsed_seconds=round(time.perf_counter()-start,2),
-                    mean_inference_seconds=round(inference/samples,3),coverage='解码器返回视频结束（损坏文件也可能提前结束）' if ended else '仅分析前10分钟',sms_mode='模拟发送')
-                result.update(status='completed',run_id=runlog.path.name,decoded_frames=idx,expected_frames=expected_frames,
-                    possible_truncation=bool(ended and expected_frames>0 and idx<expected_frames-1))
-                if result['possible_truncation']:
-                    result['status']='incomplete'; st.warning('解码提前结束，记录不完整，不能作为全视频验证结果。')
-                runlog.save('result.json',result)
-                st.session_state['last_analysis']=result
-                if result['status']=='completed': st.success('本轮分析完成，请进入“接警与处置”处理事件。')
-            except Exception as e:
-                if runlog is not None: runlog.save('result.json',dict(status='failed',error=repr(e)))
-                st.error(f'视频分析失败：{e}。此前已生成的事件仍保留在接警台。')
-            finally:
-                if cap is not None:cap.release()
-                if temp:Path(temp).unlink(missing_ok=True)
-    if 'last_analysis' in st.session_state:
-        result=st.session_state['last_analysis']
-        st.subheader('本轮分析概览')
-        cols=st.columns(3)
-        cols[0].metric('采样帧数',result['samples'])
-        cols[1].metric('关联事件',len(result['event_ids']))
-        cols[2].metric('分析用时',f"{result['elapsed_seconds']:.1f} 秒")
-        st.caption(result['coverage'])
-        with st.expander('查看完整分析记录'):st.json(result)
+            st.markdown('<div class="empty">▷<strong>监测画面待接入</strong>上传一段车棚视频，查看疑似火情与事件记录<br><small>建议使用短视频 · 最多分析前 10 分钟</small></div>',unsafe_allow_html=True)
+        if start_analysis:
+            if not site.strip() or not contact.strip():
+                st.error('请填写车棚位置与值班人员')
+            else:
+                cap=None; temp=None; runlog=None
+                try:
+                    import cv2
+                    blob=upload.getvalue()
+                    video_hash=hashlib.sha256(blob).hexdigest()
+                    model_hash=digest(find_weight())
+                    configuration=dict(site=site,video=upload.name,video_sha256=video_hash,model_sha256=model_hash,
+                        threshold=threshold,interval=float(interval),required=int(required),clear=5,imgsz=960,device='cpu',
+                        max_video_seconds=600,sms_mode='模拟发送',
+                        code_sha256={n:digest(ROOT/n) for n in ['shed_app.py','shed_events.py','shed_runlog.py','shed_auth.py']})
+                    identity={k:configuration[k] for k in ['site','video_sha256','model_sha256','threshold','interval','required','clear','imgsz','device']}
+                    batch_key=hashlib.sha256(json.dumps(identity,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+                    runlog=RunLog(store.root,configuration)
+                    with tempfile.NamedTemporaryFile(suffix=Path(upload.name).suffix,delete=False) as f:
+                        f.write(blob);temp=f.name
+                    cap=cv2.VideoCapture(temp)
+                    fps=cap.get(cv2.CAP_PROP_FPS)
+                    expected_frames=cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    if not cap.isOpened() or not 0<fps<1000:
+                        raise ValueError('无法解码视频或帧率无效，请转换为标准 MP4 后重试')
+                    gate=Gate(int(required));stride=max(1,round(fps*interval))
+                    preview=st.empty();status=st.empty();start=time.perf_counter()
+                    samples=0;events=[];idx=0;inference=0.;ended=False
+                    while idx/fps<600:
+                        ok,frame=cap.read()
+                        if not ok:
+                            ended=True;break
+                        t=idx/fps;idx+=1
+                        if (idx-1)%stride:continue
+                        tick=time.perf_counter();score,marked,boxes=predict(frame,threshold)
+                        inference+=time.perf_counter()-tick;samples+=1
+                        first=gate.step(score>=threshold,t)
+                        runlog.frame(dict(frame_index=idx-1,video_seconds=t,time_basis='frame_index/fps',
+                            score=score,boxes=boxes,positive=score>=threshold,confirmation_start=first,
+                            inference_seconds=time.perf_counter()-tick))
+                        preview.image(marked,channels='BGR',caption=f'视频 {t:.1f}s · '+('疑似火情' if score>=threshold else '本采样帧未检出'),use_container_width=True)
+                        if first is not None:
+                            # Store evidence before publishing an actionable event.
+                            import uuid
+                            event_key=batch_key+':'+str(first)
+                            evidence=hashlib.sha256(event_key.encode()).hexdigest()+'.jpg'
+                            if not (store.root/evidence).exists() and not cv2.imwrite(str(store.root/evidence),marked):
+                                raise ValueError('告警截图保存失败')
+                            eid=store.create(event_key=event_key,run_id=runlog.path.name,site=site,contact=contact,video=upload.name,video_sha256=hashlib.sha256(blob).hexdigest(),
+                                video_time=t,first_positive_time=first,confirmation_video_seconds=t-first,
+                                analysis_elapsed_seconds=time.perf_counter()-start,threshold=threshold,score=score,evidence=evidence)
+                            events.append(eid)
+                        status.info(f'已分析 {samples} 个采样帧，关联 {len(events)} 个事件（含复用）· 短信仅模拟')
+                    if samples==0:raise ValueError('视频未解码出任何有效帧')
+                    result=dict(video=upload.name,samples=samples,event_ids=events,elapsed_seconds=round(time.perf_counter()-start,2),
+                        mean_inference_seconds=round(inference/samples,3),coverage='解码器返回视频结束（损坏文件也可能提前结束）' if ended else '仅分析前10分钟',sms_mode='模拟发送')
+                    result.update(status='completed',run_id=runlog.path.name,decoded_frames=idx,expected_frames=expected_frames,
+                        possible_truncation=bool(ended and expected_frames>0 and idx<expected_frames-1))
+                    if result['possible_truncation']:
+                        result['status']='incomplete'; st.warning('解码提前结束，记录不完整，不能作为全视频验证结果。')
+                    runlog.save('result.json',result)
+                    st.session_state['last_analysis']=result
+                    if result['status']=='completed': st.success('本轮分析完成，请进入“接警与处置”处理事件。')
+                except Exception as e:
+                    if runlog is not None: runlog.save('result.json',dict(status='failed',error=repr(e)))
+                    st.error(f'视频分析失败：{e}。此前已生成的事件仍保留在接警台。')
+                finally:
+                    if cap is not None:cap.release()
+                    if temp:Path(temp).unlink(missing_ok=True)
+        if 'last_analysis' in st.session_state:
+            result=st.session_state['last_analysis']
+            st.subheader('本轮分析概览')
+            cols=st.columns(3)
+            cols[0].metric('采样帧数',result['samples'])
+            cols[1].metric('关联事件',len(result['event_ids']))
+            cols[2].metric('分析用时',f"{result['elapsed_seconds']:.1f} 秒")
+            st.caption(result['coverage'])
+            with st.expander('查看完整分析记录'):st.json(result)
 
 with desk:
     st.markdown('<div class="section-kicker">INCIDENT RESPONSE</div>',unsafe_allow_html=True)
     st.subheader('保卫部接警台')
-    st.caption('此页为登录后使用的演示接警台。处置记录绑定登录账号；尚未实现角色分级、手机短信链接或自动升级通知。')
+    st.caption('开放演示接警台：任何访客均可接警与结案，操作统一标记为匿名演示用户。短信仅模拟发送。')
     if st.button('刷新事件'):st.rerun()
     rows=store.all()
     a,b,c=st.columns(3)
@@ -192,12 +161,11 @@ with desk:
     b.metric('处理中',sum(r['status']=='处理中' for r in rows))
     c.metric('已结案',sum(r['status']=='已结案' for r in rows))
     st.caption('人工判为误报的事件数：'+str(sum(r.get('verdict')=='误报' for r in rows))+'。缺少完整真实标注，暂不计算误报率或漏检率。')
-    if operator_name:
-        st.download_button('导出事件与处置记录',json.dumps(rows,ensure_ascii=False,indent=2),'shed_events.json','application/json')
-        if st.button('生成事件及证据备份（请在分析完成后操作）'):
-            st.session_state['backup_bytes']=store.export_backup()
-        if 'backup_bytes' in st.session_state:
-            st.download_button('下载备份ZIP',st.session_state['backup_bytes'],'shed_backup.zip','application/zip')
+    st.download_button('导出事件与处置记录',json.dumps(rows,ensure_ascii=False,indent=2),'shed_events.json','application/json')
+    if st.button('生成事件及证据备份（请在分析完成后操作）'):
+        st.session_state['backup_bytes']=store.export_backup()
+    if 'backup_bytes' in st.session_state:
+        st.download_button('下载备份ZIP',st.session_state['backup_bytes'],'shed_backup.zip','application/zip')
     filter_status=st.selectbox('查看事件',['全部','待接警','处理中','已结案'])
     rows=[r for r in rows if filter_status=='全部' or r['status']==filter_status]
     event_table(rows)
@@ -213,7 +181,7 @@ with desk:
             if evidence.exists():st.image(str(evidence),use_container_width=True)
             st.markdown('**模拟短信预览**')
             st.info(r['sms']['body']);st.caption(r['sms']['status']+'；不提供真实送达时间。')
-            if operator_name and r['status']!='已结案':
+            if r['status']!='已结案':
                 with st.form(r['id']):
                     operator=operator_name
                     st.caption('处置账号：'+operator)

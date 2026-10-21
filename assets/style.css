@@ -46,3 +46,14 @@ h1,h2,h3,p,label{color:var(--text)}
 @media(max-width:1400px){.block-container{padding:10px 16px 30px}.metric b{font-size:24px}[data-baseweb="tab"]{padding:8px 14px}.hud{min-height:260px}}
 @media(max-width:900px){[data-testid="stHorizontalBlock"]{flex-wrap:wrap!important}[data-testid="stColumn"]{min-width:100%!important}.command-header small{letter-spacing:1px}.hud{min-height:220px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* Keep controls dark even when the cloud theme defaults to light. */
+.stApp button,.stApp button:hover,.stApp button:focus,.stApp button:active{background-color:#102a4e!important;color:#e6f1ff!important;border-color:#2482b8!important}
+.stApp button:focus-visible{outline:2px solid #00d4ff!important;outline-offset:2px}
+.stApp button:hover{background-color:#164069!important;border-color:#00d4ff!important}
+.stApp button:disabled{opacity:.45}
+.stApp input,.stApp textarea,[data-baseweb="input"],[data-baseweb="base-input"],[data-baseweb="select"]>div,[data-testid="stFileUploaderDropzone"],[data-testid="stFileUploaderFile"]{background-color:#102440!important;color:#e6f1ff!important;caret-color:#00d4ff;border-color:#24547c!important}
+.stApp input::placeholder,.stApp textarea::placeholder{color:#8aa7c8!important}
+[data-baseweb="popover"],[role="listbox"],[role="option"]{background:#102440!important;color:#e6f1ff!important}
+.stApp [role="tab"][aria-selected="true"]{background:#153c59!important;color:#00d4ff!important;border-bottom:2px solid #00d4ff!important}
+[data-testid="stVideo"] video{max-height:62vh;object-fit:contain;background:#060e1b}

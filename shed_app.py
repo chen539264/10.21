@@ -26,29 +26,31 @@ try:
         users=st.secrets.to_dict().get('accounts',{})
 except Exception:
     users={}
-if not users:
-    st.error('尚未配置有效接警账户，请配置用户文件或Secrets中的accounts。默认拒绝匿名访问。')
-    st.stop()
 auth_revision=hashlib.sha256(json.dumps(users,sort_keys=True).encode()).hexdigest()
 if st.session_state.get('auth_revision')!=auth_revision:
     st.session_state.pop('authenticated_user',None)
-if not st.session_state.get('authenticated_user'):
-    with st.form('login'):
-        username=st.text_input('登录账号')
-        password=st.text_input('密码',type='password')
-        submitted=st.form_submit_button('登录')
-    if submitted:
-        if verify(users,username,password):
-            st.session_state['authenticated_user']=username
-            st.session_state['auth_revision']=auth_revision
-            st.rerun()
+operator_name=st.session_state.get('authenticated_user')
+if operator_name:
+    st.caption('当前接警账号：'+operator_name)
+    if st.button('退出登录'):
+        st.session_state.clear(); st.rerun()
+else:
+    st.caption('公开浏览模式 · 图片检测可直接体验；视频分析、接警处置及导出需工作人员登录。')
+    with st.expander('工作人员登录',expanded=False):
+        if not users:
+            st.info('尚未配置工作人员账户，不影响公开浏览。')
         else:
-            time.sleep(1); st.error('账号或密码错误')
-    st.stop()
-operator_name=st.session_state['authenticated_user']
-st.caption('当前接警账号：'+operator_name)
-if st.button('退出登录'):
-    st.session_state.clear(); st.rerun()
+            with st.form('login'):
+                username=st.text_input('登录账号')
+                password=st.text_input('密码',type='password')
+                submitted=st.form_submit_button('登录')
+            if submitted:
+                if verify(users,username,password):
+                    st.session_state['authenticated_user']=username
+                    st.session_state['auth_revision']=auth_revision
+                    st.rerun()
+                else:
+                    time.sleep(1); st.error('账号或密码错误')
 store=Store(Path(os.environ.get('SHED_DATA_DIR',str(ROOT/'shed_runtime'))))
 overview=store.all()
 @st.cache_resource
@@ -100,7 +102,8 @@ with video_tab:
         st.video(upload)
     else:
         st.markdown('<div class="empty">▷<strong>监测画面待接入</strong>上传一段车棚视频，查看疑似火情与事件记录<br><small>建议使用短视频 · 最多分析前 10 分钟</small></div>',unsafe_allow_html=True)
-    if st.button('开始视频分析',disabled=upload is None,type='primary'):
+    if not operator_name: st.caption('视频分析会写入公共事件库，请先使用工作人员账户登录。')
+    if st.button('开始视频分析',disabled=upload is None or not operator_name,type='primary'):
         if not site.strip() or not contact.strip():
             st.error('请填写车棚位置与值班人员')
         else:
@@ -189,11 +192,12 @@ with desk:
     b.metric('处理中',sum(r['status']=='处理中' for r in rows))
     c.metric('已结案',sum(r['status']=='已结案' for r in rows))
     st.caption('人工判为误报的事件数：'+str(sum(r.get('verdict')=='误报' for r in rows))+'。缺少完整真实标注，暂不计算误报率或漏检率。')
-    st.download_button('导出事件与处置记录',json.dumps(rows,ensure_ascii=False,indent=2),'shed_events.json','application/json')
-    if st.button('生成事件及证据备份（请在分析完成后操作）'):
-        st.session_state['backup_bytes']=store.export_backup()
-    if 'backup_bytes' in st.session_state:
-        st.download_button('下载备份ZIP',st.session_state['backup_bytes'],'shed_backup.zip','application/zip')
+    if operator_name:
+        st.download_button('导出事件与处置记录',json.dumps(rows,ensure_ascii=False,indent=2),'shed_events.json','application/json')
+        if st.button('生成事件及证据备份（请在分析完成后操作）'):
+            st.session_state['backup_bytes']=store.export_backup()
+        if 'backup_bytes' in st.session_state:
+            st.download_button('下载备份ZIP',st.session_state['backup_bytes'],'shed_backup.zip','application/zip')
     filter_status=st.selectbox('查看事件',['全部','待接警','处理中','已结案'])
     rows=[r for r in rows if filter_status=='全部' or r['status']==filter_status]
     event_table(rows)
@@ -209,7 +213,7 @@ with desk:
             if evidence.exists():st.image(str(evidence),use_container_width=True)
             st.markdown('**模拟短信预览**')
             st.info(r['sms']['body']);st.caption(r['sms']['status']+'；不提供真实送达时间。')
-            if r['status']!='已结案':
+            if operator_name and r['status']!='已结案':
                 with st.form(r['id']):
                     operator=operator_name
                     st.caption('处置账号：'+operator)
@@ -242,3 +246,4 @@ with image_tab:
             st.caption('图片检测仅作辅助展示，不自动生成视频告警事件。')
         except Exception as e:st.error(str(e))
 st.caption('现有模型为原型基础，未检出不代表现场安全；纯烟雾能力及车棚场景效果尚需验证。')
+
